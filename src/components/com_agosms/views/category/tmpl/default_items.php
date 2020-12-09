@@ -30,10 +30,136 @@ $listOrder = $this->escape($this->state->get('list.ordering'));
 $listDirn  = $this->escape($this->state->get('list.direction'));
 ?>
 
+<script>
+  jQuery( function() {
+   var t = jQuery('.tge_agosm_tablesorter');
+   t.tablesorter( {
+    debug: true,
+    theme : 'jui', // theme "jui" and "bootstrap" override the uitheme widget option in v2.7+
+    headerTemplate : '{content} {icon}', // needed to add icon for jui theme
+    // widget code now contained in the jquery.tablesorter.widgets.js file
+    widgets : ['uitheme', 'filter', 'zebra'],
+    widgetOptions : {
+      // zebra striping class names - the uitheme widget adds the class names defined in
+      // $.tablesorter.themes to the zebra widget class names
+      zebra   : ["even", "odd"],
+      // set the uitheme widget to use the jQuery UI theme class names
+      // ** this is now optional, and will be overridden if the theme name exists in $.tablesorter.themes **
+      uitheme : 'jui',
+
+      filter_functions :
+      {
+        // See: https://mottie.github.io/tablesorter/docs/example-widget-filter-custom.html
+        //  e = exact text from cell
+        //  n = normalized value returned by the column parser
+        //  f = search filter input value
+        //  i = column index
+        // Filter coordinates:
+        2 : function(e, n, f, i, $r, c, data)
+        {
+          console.log("TGE: Filtering by coords " + f + ": " + e);
+          var co = e.split(",");
+	  var bb = f.split(",");
+          var bbox = new L.LatLngBounds(new L.LatLng(bb[1], bb[0]), new L.LatLng(bb[3], bb[2]));
+          return bbox.contains(new L.LatLng(co[0], co[1]));
+        }
+      }
+    } } );
+
+    // Hide coordinates column
+    t.find('th:nth-child(3)').css("display", "none");
+    t.find('td:nth-child(3)').css("display", "none");
+
+    // And the ID columns
+    t.find('th:nth-child(4)').css("display", "none");
+    t.find('td:nth-child(4)').css("display", "none");
+
+    t.bind('filterEnd', function(e, filter)
+    {
+      // Filter function triggered by the table - possibly the number of visible rows has changed.
+      // Update the map correspondingly.
+      console.log("TGE: List filtered. Show/hide map markers.");
+
+      // Determine the map ID and set the marker objects
+      var mapID = jQuery(".leafletmapMod").prop("id").replace('map', '');
+      var markers = window['agosm' + mapID]['markers'];
+      var cluster = window['agosm' + mapID]['cluster'];
+
+      // Loop over all rows (visible or not):
+      t.find('tr').each( function()
+      {
+        var row = jQuery(this);
+        var id = row.find('td:nth-child(4)').text();
+
+        // Skip rows w/o ID (the header)
+        if(! id) { return; }
+
+        // Is the row hidden, i.e. filtered out?
+        var name = row.find('td:nth-child(1)').text();
+        var hidden = (row.css('display') == 'none');
+        console.log("TGE: Row " + name + "(" + id + ") hidden: " + hidden);
+
+        var m = markers[id];
+        console.log("TGE: Marker " + id + " visible: " + m.visible + " -> " + (! hidden));
+
+        // If not yet hidden, hide the marker and update visibility status
+        if(m.visible)
+        {
+          if(hidden)
+          {
+            console.log("TGE: Hiding marker " + id);
+            cluster.ref.removeLayer(m.ref);
+            m.visible = false;
+          }
+        }
+        else
+        {
+          // Same the other way around
+          if(! hidden)
+          {
+            console.log("TGE: Showing marker " + id);
+            cluster.ref.addLayer(m.ref);
+            m.visible = true;
+          }
+        }
+      });
+    });
+
+  } );
+
+  // Focus the map to the desired entry
+  function focusMap(lat, lon)
+  {
+    console.log("TGE: Table focus clicked - updating map ...");
+    var pos = new L.LatLng(lat, lon);
+    var mapID = jQuery(".leafletmapMod").prop("id");
+    var map = window["my" + mapID];
+    map.setView(pos);
+  }
+
+  // The map has been zoomed or moved, update the table to show only the items visible in map
+  // Works by setting the filter value of the (invisible) coordinates column and then trigger a filter,
+  // which will call the filter function "Filtering by coords" above
+  function filterListOnMapChange(e)
+  {
+    console.log("TGE: Map changed - updating table ...");
+    var t = jQuery('.tge_agosm_tablesorter');
+    if(t)
+    {
+      var mapID = jQuery(".leafletmapMod").prop("id");
+      var map = window["my" + mapID];
+      var columns = jQuery.tablesorter.getFilters(t);
+      columns[2] = map.getBounds().toBBoxString();
+      t.trigger('search', [ columns ] );
+    }
+  }
+</script>
+
 <?php if (empty($this->items)) : ?>
 	<p> <?php echo JText::_('COM_AGOSMS_NO_AGOSMS'); ?></p>
 <?php else : ?>
 
+<!-- TGE
 <form action="<?php echo htmlspecialchars(JUri::getInstance()->toString()); ?>" method="post" name="adminForm" id="adminForm">
 	<?php if ($this->params->get('filter_field') != 'hide' || $this->params->get('show_pagination_limit')) : ?>
 	<fieldset class="filters btn-toolbar">
@@ -54,9 +180,79 @@ $listDirn  = $this->escape($this->state->get('list.direction'));
 		<?php endif; ?>
 	</fieldset>
 	<?php endif; ?>
+ -->
+
+<!-- TGE
 		<ul class="category list-striped list-condensed">
+-->
+
+<?php
+  // Some vars
+  $idx = 0;
+  $jumpToMapImg = JURI::base() . 'media/mod_agosm/leaflet-gpx/pin-icon-start.png';
+?>
+
+<table class="tge_agosm_tablesorter tablesorter" id="tge_agosm_tablesorter">
+
 			<?php foreach ($this->items as $i => $item) : ?>
 				<?php if (in_array($item->access, $this->user->getAuthorisedViewLevels())) : ?>
+<?php
+  $customFields = FieldsHelper::getFields('com_agosms.agosm', $item, true);
+
+  // We need that one to format the custom fields, namely description
+  $dispatcher = JEventDispatcher::getInstance();
+
+  // First item? Generate table header. The two columns Koordinaten and ID will be hidden (above)
+  if($idx == 0) :
+    echo "<thead>";
+    echo "<tr>";
+    echo "<th>Name</th>";
+    echo "<th>Beschreibung</th>";
+    echo "<th>Koordinaten</th>";
+    echo "<th>ID</th>";
+    foreach ($customFields as $i) :
+      echo "<th> $i->label </th>";
+    endforeach;
+    echo "<th>Zeige in Karte</th>";
+    echo "</tr>";
+    echo "</thead>";
+    echo "<tbody>";
+  endif; 
+
+  // Generate current row
+  echo "<tr>";
+  $t = $this->escape($item->title);
+  echo "<td>$t</td>";
+
+  $d = $item->description;
+  if(strpos($d, '{field'))
+  {
+    // TGE: Pretty ugly, but did not find a better way :-|
+    // Save away possibly set item->text, then set that to popuptext. The standard plugins/content/fields/fields.php cares for "text" only
+    $tmpText = $item->text ? $item->text : null;
+    $item->text = $item->description;
+    // This will trigger the standard fields plugin:
+    $dispatcher->trigger('onContentPrepare', array('com_agosms.agosm', &$item, &$item->params, 0));
+    $d = $item->text;
+    if($tmpText) { $item->text = $tmpText; };
+  }
+
+  echo "<td>$d</td>";
+  echo "<td>$item->coordinates</td>";
+  echo "<td>$item->id</td>";
+  foreach ($customFields as $i) :
+    echo "<td>$i->value</td>";
+  endforeach;
+  // Have a button that centers the map to this entry
+  echo "<td><img alt='Karte' title='Karte' src='$jumpToMapImg' onclick='focusMap($item->coordinates);' width='18' height='18' /></td>";
+  echo "</tr>";
+
+  // Increment index
+  $idx++;
+
+?>
+
+<!--
 					<?php if ($this->items[$i]->state == 0) : ?>
 						<li class="system-unpublished cat-list-row<?php echo $i % 2; ?>">
 					<?php else : ?>
@@ -153,10 +349,16 @@ $listDirn  = $this->escape($this->state->get('list.direction'));
 						<?php echo $item->description; ?>
 						<?php endif; ?>
 						</li>
+-->
 				<?php endif;?>
 			<?php endforeach; ?>
+<!-- TGE
 		</ul>
+-->
+</tbody>
+</table>
 
+<!--
 		<?php // Code to add a link to submit a agosm. ?>
 		<?php if ($this->params->get('show_pagination')) : ?>
 		 <div class="pagination">
@@ -169,4 +371,6 @@ $listDirn  = $this->escape($this->state->get('list.direction'));
 			</div>
 		<?php endif; ?>
 	</form>
+-->
 <?php endif; ?>
+
