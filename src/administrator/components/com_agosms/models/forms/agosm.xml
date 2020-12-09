@@ -250,7 +250,6 @@
 			description="MOD_AGOSM_LATLON_DESC"
 		/>
 
-<!-- TGE type="hidden" -->
 		<field
 			name="url"
 			label="COM_AGOSMS_FIELD_URL_LABEL"
