@@ -252,6 +252,7 @@
 
 		<field
 			name="url"
+		        type="hidden"
 			label="COM_AGOSMS_FIELD_URL_LABEL"
 			description="COM_AGOSMS_FIELD_URL_DESC"
 			class="span12"
